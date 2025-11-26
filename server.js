@@ -44,3 +44,6 @@ server.on('error', (err) => {
 });
 
 module.exports = { app, server };
+app.get("/", (req, res) => {
+  res.send("Attendify Backend is Live 🚀");
+});
