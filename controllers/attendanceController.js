@@ -215,10 +215,40 @@ const getSessionClassAverage = async (req, res) => {
   }
 };
 
+// Get live QR for a class (for teachers)
+const getLiveQR = async (req, res) => {
+  const { classId } = req.params;
+  const teacherId = req.user._id;
+
+  try {
+    // Find the most recent active session for this class
+    const session = await Session.findOne({ class: classId, isActive: true })
+      .populate('class', 'name code subject')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    if (!session) {
+      return res.status(404).json({ message: 'No active session found for this class' });
+    }
+
+    // Return QR image, expiry and class details
+    res.json({
+      qrImage: session.qrCode,
+      expiresAt: session.expiresAt,
+      sessionId: session.sessionId,
+      classDetails: session.class || {},
+      lectureTiming: session.lectureTiming,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   markAttendance,
   getAttendanceReport,
   getStudentAttendance,
   getAttendanceSummary,
   getSessionClassAverage,
+  getLiveQR,
 };

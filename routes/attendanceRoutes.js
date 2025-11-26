@@ -13,6 +13,9 @@ const router = express.Router();
 // Mark attendance by scanning QR (student)
 router.post('/mark', protect, markAttendance);
 
+// Live QR for teacher to view the current session QR
+router.get('/live-qr/:classId', protect, admin, (req, res, next) => getLiveQR(req, res, next));
+
 // Get attendance report (teacher)
 router.get('/report', protect, admin, getAttendanceReport);
 
