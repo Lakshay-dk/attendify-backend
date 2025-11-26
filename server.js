@@ -16,60 +16,61 @@ connectDB();
 
 const app = express();
 
-// ----------------------------------------------------------
-// ✅ FIXED CORS FOR NETLIFY (IMPORTANT FOR Live QR)
-// ----------------------------------------------------------
+// ======================================================
+// 🚀 FIXED CORS (WORKS FOR NETLIFY + LOCALHOST)
+// ======================================================
 app.use(
   cors({
     origin: [
-      process.env.FRONTEND_URL,           // e.g. https://your-site.netlify.app
-      'http://localhost:5173',            // local development
+      process.env.FRONTEND_URL || "*",   // Netlify or frontend URL
+      "http://localhost:5173",           // Dev frontend
     ],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,
   })
 );
 
 app.use(express.json());
 
-// ----------------------------------------------------------
-// ✅ ROOT ROUTE (MOVED ABOVE exports)
-// ----------------------------------------------------------
-app.get('/', (req, res) => {
-  res.send('Attendify Backend is Live 🚀');
+// ======================================================
+// ROOT ROUTE
+// ======================================================
+app.get("/", (req, res) => {
+  res.send("Attendify Backend is Live 🚀");
 });
 
-// ----------------------------------------------------------
-// Routes
-// ----------------------------------------------------------
+// ======================================================
+// ROUTES
+// ======================================================
 app.use('/api/auth', authRoutes);
 app.use('/api/students', studentRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/classes', classRoutes);
 app.use('/api/sessions', sessionRoutes);
 
-// ----------------------------------------------------------
-// Error handler (MUST be last)
-// ----------------------------------------------------------
+// ======================================================
+// ERROR HANDLER (last middleware)
+// ======================================================
 app.use(errorHandler);
 
-// ----------------------------------------------------------
-// Server setup
-// ----------------------------------------------------------
+// ======================================================
+// SERVER START
+// ======================================================
 const PORT = process.env.PORT || 5002;
 
 const server = app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`🚀 Attendify Backend running on port ${PORT}`);
 });
 
-// Helpful listener for PORT issues
-server.on('error', (err) => {
-  if (err.code === 'EADDRINUSE') {
-    console.error(`Port ${PORT} is already in use. Please free it or change PORT in .env.`);
+// PORT ISSUE HANDLING
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`❌ Port ${PORT} is already in use.`);
   } else {
-    console.error('Server error:', err);
+    console.error("❌ Server error:", err);
   }
   process.exit(1);
 });
 
-// Export server/app
 module.exports = { app, server };
