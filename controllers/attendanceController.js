@@ -2,30 +2,28 @@ const Attendance = require('../models/Attendance');
 const Student = require('../models/Student');
 const Session = require('../models/Session');
 
-// Mark attendance by scanning QR code
+/* ----------------------------------------------------
+   MARK ATTENDANCE (student scans QR)
+---------------------------------------------------- */
 const markAttendance = async (req, res) => {
   const { sessionId } = req.body;
   const studentId = req.user._id;
 
   try {
-    // Find student record
     const student = await Student.findOne({ user: studentId });
     if (!student) {
       return res.status(404).json({ message: 'Student not found' });
     }
 
-    // Find session
     const session = await Session.findOne({ sessionId });
     if (!session) {
       return res.status(404).json({ message: 'Invalid session' });
     }
 
-    // Check if session is still active
     if (!session.isActive || session.expiresAt < Date.now()) {
       return res.status(400).json({ message: 'Session has expired' });
     }
 
-    // Check if attendance already marked for this session
     const existingAttendance = await Attendance.findOne({
       student: student._id,
       session: session._id,
@@ -35,7 +33,6 @@ const markAttendance = async (req, res) => {
       return res.status(400).json({ message: 'Attendance already marked for this session' });
     }
 
-    // Mark attendance
     const attendance = await Attendance.create({
       student: student._id,
       session: session._id,
@@ -45,12 +42,58 @@ const markAttendance = async (req, res) => {
     });
 
     res.status(201).json(attendance);
+
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// Get attendance report for teacher
+/* ----------------------------------------------------
+   GET QR FOR STUDENTS + TEACHERS (Unified)
+---------------------------------------------------- */
+const getQRForClass = async (req, res) => {
+  const { classId } = req.params;
+
+  try {
+    // Most recent active session
+    const session = await Session.findOne({ class: classId, isActive: true })
+      .sort({ createdAt: -1 })
+      .populate("class", "name code subject")
+      .lean();
+
+    if (!session) {
+      return res.status(404).json({ message: "No active session found for this class" });
+    }
+
+    // Calculate expiry in seconds
+    const now = Date.now();
+    const expiresIn = Math.max(0, Math.floor((session.expiresAt - now) / 1000));
+
+    // If expired, let frontend show expired message
+    if (expiresIn <= 0) {
+      return res.json({
+        qrImage: null,
+        expiresIn: 0,
+        message: "Session expired",
+      });
+    }
+
+    return res.json({
+      qrImage: session.qrCode,
+      expiresIn,
+      sessionId: session.sessionId,
+      classDetails: session.class,
+      lectureTiming: session.lectureTiming,
+    });
+
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+/* ----------------------------------------------------
+   ATTENDANCE REPORT FOR TEACHER
+---------------------------------------------------- */
 const getAttendanceReport = async (req, res) => {
   const { classId, startDate, endDate, studentId } = req.query;
   const teacherId = req.user._id;
@@ -60,6 +103,7 @@ const getAttendanceReport = async (req, res) => {
 
     if (classId) query.class = classId;
     if (studentId) query.student = studentId;
+
     if (startDate || endDate) {
       query.scanTime = {};
       if (startDate) query.scanTime.$gte = new Date(startDate);
@@ -72,12 +116,15 @@ const getAttendanceReport = async (req, res) => {
       .populate('class', 'name');
 
     res.json(attendance);
+
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// Get student attendance history
+/* ----------------------------------------------------
+   GET STUDENT ATTENDANCE HISTORY
+---------------------------------------------------- */
 const getStudentAttendance = async (req, res) => {
   const studentId = req.user._id;
   const { classId } = req.query;
@@ -88,74 +135,67 @@ const getStudentAttendance = async (req, res) => {
       return res.status(404).json({ message: 'Student not found' });
     }
 
-    const attendanceFilter = { student: student._id };
-    if (classId) {
-      attendanceFilter.class = classId;
-    }
+    const filter = { student: student._id };
+    if (classId) filter.class = classId;
 
-    const attendance = await Attendance.find(attendanceFilter)
+    const attendance = await Attendance.find(filter)
       .populate('session', 'lectureTiming')
       .populate('class', 'name')
       .sort({ createdAt: -1 })
       .lean();
 
-    const formattedRecords = attendance.map((record) => ({
-      _id: record._id,
-      status: record.status === 'present' ? 'Present' : 'Absent',
-      createdAt: record.createdAt,
-      scanTime: record.scanTime,
-      className: record.class?.name || 'Class',
-      sessionTiming: record.session?.lectureTiming || '',
+    const formatted = attendance.map((r) => ({
+      _id: r._id,
+      status: r.status === "present" ? "Present" : "Absent",
+      scanTime: r.scanTime,
+      createdAt: r.createdAt,
+      className: r.class?.name || "Class",
+      sessionTiming: r.session?.lectureTiming || "",
     }));
 
-    const totalSessions = formattedRecords.length;
-    const presentCount = formattedRecords.filter((rec) => rec.status === 'Present').length;
-    const percentage = totalSessions > 0 ? (presentCount / totalSessions) * 100 : 0;
+    const total = formatted.length;
+    const present = formatted.filter((x) => x.status === "Present").length;
+    const percentage = total > 0 ? Number(((present / total) * 100).toFixed(2)) : 0;
 
     res.json({
-      attendanceRecords: formattedRecords,
-      percentage: Number(percentage.toFixed(2)),
+      attendanceRecords: formatted,
+      percentage,
     });
+
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// Get attendance summary for teacher dashboard
+/* ----------------------------------------------------
+   TEACHER DASHBOARD SUMMARY
+---------------------------------------------------- */
 const getAttendanceSummary = async (req, res) => {
   const { classId } = req.query;
   const teacherId = req.user._id;
 
   try {
-    // Filter attendance by teacher and optional class
-    const baseAttendanceQuery = { teacher: teacherId };
-    if (classId) baseAttendanceQuery.class = classId;
+    const baseQuery = { teacher: teacherId };
+    if (classId) baseQuery.class = classId;
 
-    // Today's date range
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    const today = new Date(); today.setHours(0,0,0,0);
+    const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
 
-    // Present today (per student, per class)
     const presentToday = await Attendance.countDocuments({
-      ...baseAttendanceQuery,
+      ...baseQuery,
       status: 'present',
       scanTime: { $gte: today, $lt: tomorrow },
     });
 
-    // Total students in this teacher's class (or all classes)
     const studentQuery = { teacher: teacherId };
     if (classId) studentQuery.class = classId;
     const totalStudents = await Student.countDocuments(studentQuery);
 
-    // Average attendance for today as a percentage of students
     const averageAttendance =
       totalStudents > 0 ? (presentToday / totalStudents) * 100 : 0;
 
-    // Recent logs for this class/teacher today (most recent first)
     const recentLogs = await Attendance.find({
-      ...baseAttendanceQuery,
+      ...baseQuery,
       scanTime: { $gte: today, $lt: tomorrow },
     })
       .populate('student', 'name enrollmentNumber')
@@ -164,7 +204,7 @@ const getAttendanceSummary = async (req, res) => {
       .limit(10)
       .lean();
 
-    const recentLogsMapped = recentLogs.map((log) => ({
+    const formattedLogs = recentLogs.map((log) => ({
       _id: log._id,
       studentName: log.student?.name || 'Unknown',
       scanTime: log.scanTime,
@@ -175,18 +215,21 @@ const getAttendanceSummary = async (req, res) => {
 
     res.json({
       totalStudents,
-      presentToday: presentToday,
+      presentToday,
       averageAttendance,
-      recentLogs: recentLogsMapped,
+      recentLogs: formattedLogs,
     });
+
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// Get average attendance for a single session in a class
+/* ----------------------------------------------------
+   GET CLASS SESSION AVERAGE
+---------------------------------------------------- */
 const getSessionClassAverage = async (req, res) => {
-  const { sessionId } = req.query; // string SESSION-* id
+  const { sessionId } = req.query;
   const teacherId = req.user._id;
 
   try {
@@ -210,45 +253,20 @@ const getSessionClassAverage = async (req, res) => {
       presentCount,
       averageAttendance: Number(percentage.toFixed(2)),
     });
+
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// Get live QR for a class (for teachers)
-const getLiveQR = async (req, res) => {
-  const { classId } = req.params;
-  const teacherId = req.user._id;
-
-  try {
-    // Find the most recent active session for this class
-    const session = await Session.findOne({ class: classId, isActive: true })
-      .populate('class', 'name code subject')
-      .sort({ createdAt: -1 })
-      .lean();
-
-    if (!session) {
-      return res.status(404).json({ message: 'No active session found for this class' });
-    }
-
-    // Return QR image, expiry and class details
-    res.json({
-      qrImage: session.qrCode,
-      expiresAt: session.expiresAt,
-      sessionId: session.sessionId,
-      classDetails: session.class || {},
-      lectureTiming: session.lectureTiming,
-    });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
+/* ----------------------------------------------------
+   EXPOSE FUNCTIONS
+---------------------------------------------------- */
 module.exports = {
   markAttendance,
+  getQRForClass,           // ⭐ unified QR (teacher + student)
   getAttendanceReport,
   getStudentAttendance,
   getAttendanceSummary,
   getSessionClassAverage,
-  getLiveQR,
 };

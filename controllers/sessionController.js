@@ -2,19 +2,23 @@ const Session = require('../models/Session');
 const QRCode = require('qrcode');
 const crypto = require('crypto');
 
-// Generate session QR code
+/* ----------------------------------------------------
+   Generate a new QR Session (Teacher only)
+---------------------------------------------------- */
 const generateSessionQR = async (req, res) => {
-  const { classId, lectureTiming, duration } = req.body;
+  const { classId, lectureTiming, durationMinutes } = req.body;
   const teacherId = req.user._id;
 
   try {
-    // Create unique session ID
-    const sessionId = `SESSION-${classId}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
-    
-    // Calculate expiry time (default 2 hours from now)
-    const expiresAt = new Date(Date.now() + (duration || 120) * 60 * 1000);
-    
-    // QR code data contains sessionId for verification
+    // 💡 Make a unique readable session ID
+    const sessionId = `SESSION-${classId}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+
+    // 💡 Duration in minutes (fallback = 60)
+    const duration = durationMinutes || 60;
+
+    const expiresAt = new Date(Date.now() + duration * 60 * 1000);
+
+    // QR data encoded as JSON
     const qrData = JSON.stringify({
       sessionId,
       classId,
@@ -22,7 +26,11 @@ const generateSessionQR = async (req, res) => {
       timestamp: new Date(),
     });
 
+    // Generate QR as base64 PNG
     const qrCode = await QRCode.toDataURL(qrData);
+
+    // Deactivate any previous active session for the same class
+    await Session.updateMany({ class: classId, isActive: true }, { $set: { isActive: false } });
 
     // Save session to database
     const session = await Session.create({
@@ -32,55 +40,82 @@ const generateSessionQR = async (req, res) => {
       qrCode,
       lectureTiming,
       expiresAt,
+      isActive: true,       // ✅ IMPORTANT FIX
     });
 
     res.status(201).json({
+      success: true,
       sessionId: session.sessionId,
       qrCode: session.qrCode,
       lectureTiming: session.lectureTiming,
       expiresAt: session.expiresAt,
     });
+
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// Get active session for a class
+/* ----------------------------------------------------
+   Get the active session for a class
+---------------------------------------------------- */
 const getActiveSession = async (req, res) => {
   const { classId } = req.params;
 
   try {
-    // Find the most recent active session for this class
-    const session = await Session.findOne({
+    let session = await Session.findOne({
       class: classId,
       isActive: true,
     }).sort({ createdAt: -1 });
 
-    if (session) {
-      res.json(session);
-    } else {
-      res.status(404).json({ message: 'No active session found' });
+    if (!session) {
+      return res.status(404).json({ message: "No active session found" });
     }
+
+    // If expired → disable it automatically
+    if (session.expiresAt < Date.now()) {
+      session.isActive = false;
+      await session.save();
+      return res.status(400).json({ message: "Session expired" });
+    }
+
+    res.json(session);
+
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// End session
+/* ----------------------------------------------------
+   End session manually (Teacher)
+---------------------------------------------------- */
 const endSession = async (req, res) => {
   const { sessionId } = req.params;
 
   try {
-    const session = await Session.findByIdAndUpdate(
-      sessionId,
+    const session = await Session.findOneAndUpdate(
+      { sessionId },             // FIXED: We use custom sessionId, not _id
       { isActive: false },
       { new: true }
     );
 
-    res.json(session);
+    if (!session) {
+      return res.status(404).json({ message: "Session not found" });
+    }
+
+    res.json({
+      success: true,
+      message: "Session ended successfully",
+      session,
+    });
+
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-module.exports = { generateSessionQR, getActiveSession, endSession };
+module.exports = {
+  generateSessionQR,
+  getActiveSession,
+  endSession,
+};
