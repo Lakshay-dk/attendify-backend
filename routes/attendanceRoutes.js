@@ -5,6 +5,7 @@ const {
 	getStudentAttendance,
 	getAttendanceSummary,
 	getSessionClassAverage,
+	getLiveQR,
 } = require('../controllers/attendanceController');
 const { protect, admin } = require('../middlewares/authMiddleware');
 
@@ -14,7 +15,7 @@ const router = express.Router();
 router.post('/mark', protect, markAttendance);
 
 // Live QR for teacher to view the current session QR
-router.get('/live-qr/:classId', protect, admin, (req, res, next) => getLiveQR(req, res, next));
+router.get('/live-qr/:classId', protect, admin, getLiveQR);
 
 // Get attendance report (teacher)
 router.get('/report', protect, admin, getAttendanceReport);
