@@ -1,47 +1,31 @@
 const express = require('express');
 const {
-  markAttendance,
-  getAttendanceReport,
-  getStudentAttendance,
-  getAttendanceSummary,
-  getSessionClassAverage,
-  getQRForClass,   // ✅ NEW unified QR handler
+	markAttendance,
+	getAttendanceReport,
+	getStudentAttendance,
+	getAttendanceSummary,
+	getSessionClassAverage,
 } = require('../controllers/attendanceController');
-
 const { protect, admin } = require('../middlewares/authMiddleware');
 
 const router = express.Router();
 
-/* ----------------------------------------------------
-   MARK ATTENDANCE (STUDENT SCANS QR)
----------------------------------------------------- */
+// Mark attendance by scanning QR (student)
 router.post('/mark', protect, markAttendance);
 
-/* ----------------------------------------------------
-   GET QR (UNIFIED ENDPOINT)
-   Students → fetch QR to scan
-   Teachers → fetch QR to display in Live Session
----------------------------------------------------- */
-router.get('/qr/:classId', protect, getQRForClass);
+// Live QR for teacher to view the current session QR
+router.get('/live-qr/:classId', protect, admin, (req, res, next) => getLiveQR(req, res, next));
 
-/* ----------------------------------------------------
-   ATTENDANCE REPORT (TEACHER)
----------------------------------------------------- */
+// Get attendance report (teacher)
 router.get('/report', protect, admin, getAttendanceReport);
 
-/* ----------------------------------------------------
-   DASHBOARD SUMMARY (TEACHER)
----------------------------------------------------- */
+// Get summary for dashboard (teacher)
 router.get('/summary', protect, admin, getAttendanceSummary);
 
-/* ----------------------------------------------------
-   SESSION AVERAGE (TEACHER)
----------------------------------------------------- */
+// Get average attendance for a specific session (teacher)
 router.get('/session-average', protect, admin, getSessionClassAverage);
 
-/* ----------------------------------------------------
-   STUDENT ATTENDANCE HISTORY (STUDENT)
----------------------------------------------------- */
+// Get student's attendance history (student)
 router.get('/history', protect, getStudentAttendance);
 
 module.exports = router;
